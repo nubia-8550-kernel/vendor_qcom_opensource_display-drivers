@@ -12,6 +12,7 @@
 #include <video/mipi_display.h>
 
 #include "dsi_panel.h"
+#include "dsi_display.h"
 #include "dsi_ctrl_hw.h"
 #include "dsi_parser.h"
 #include "sde_dbg.h"
@@ -445,7 +446,7 @@ static int dsi_panel_tx_cmd_set(struct dsi_panel *panel,
 	count = mode->priv_info->cmd_sets[type].count;
 	state = mode->priv_info->cmd_sets[type].state;
 	SDE_EVT32(type, state, count);
-    
+
 	if (count == 0) {
 		DSI_DEBUG("[%s] No commands to be sent for state(%d)\n",
 			 panel->name, type);
@@ -755,13 +756,13 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		if (panel->disp_feature->zte_lcd_bl_limit_feature_enable) {
 			if (panel->disp_feature->zte_lcd_bl_limit != panel->bl_config.brightness_max_level && \
 				panel->bl_config.bl_scale_sv != MAX_SV_BL_SCALE_LEVEL) {
-				bl_limit_store = mult_frac(panel->disp_feature->zte_lcd_bl_limit, panel->bl_config.bl_max_level, 
+				bl_limit_store = mult_frac(panel->disp_feature->zte_lcd_bl_limit, panel->bl_config.bl_max_level,
 					panel->bl_config.brightness_max_level);
-				
+
 				if (bl_lvl > bl_limit_store) {
 					pr_info("MSM_LCD bl_scale_sv=%d bl_lvl=%d to bl_limit_store=%d\n", panel->bl_config.bl_scale_sv, bl_lvl, bl_limit_store);
 					bl_lvl = bl_limit_store;
-				}				
+				}
 			}
 		}
 		/*add by zte for bl_limit end*/
@@ -3831,6 +3832,46 @@ static void dsi_panel_setup_vm_ops(struct dsi_panel *panel, bool trusted_vm_env)
 	}
 }
 
+int nt_is_panel_detected(void)
+{
+	int rc = 0;
+	if (nt_panel) {
+		if (!strcmp(nt_panel->name, "nt37705 amoled fhd+ 120hz cmd mode dsi visionox panel")) {
+			DSI_INFO("panel name detected\n");
+			rc = 1;
+		}
+	} else {
+		DSI_ERR("panel name is not detect\n");
+	}
+
+	return rc;
+}
+
+
+static struct attribute *panel_attrs[] = {
+	NULL,
+};
+
+static struct attribute_group panel_attrs_group = {
+	.attrs = panel_attrs,
+};
+
+static int dsi_panel_sysfs_init(struct dsi_panel *panel)
+{
+	int rc = 0;
+
+	rc = sysfs_create_group(&panel->parent->kobj, &panel_attrs_group);
+	if (rc)
+		DSI_ERR("failed to create panel sysfs attributes\n");
+
+	return rc;
+}
+
+static void dsi_panel_sysfs_deinit(struct dsi_panel *panel)
+{
+	sysfs_remove_group(&panel->parent->kobj, &panel_attrs_group);
+}
+
 struct dsi_panel *dsi_panel_get(struct device *parent,
 				struct device_node *of_node,
 				struct device_node *parser_node,
@@ -3961,6 +4002,10 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 
 	drm_panel_add(&panel->drm_panel);
 
+	rc = dsi_panel_sysfs_init(panel);
+	if (rc)
+		goto error;
+
 	mutex_init(&panel->panel_lock);
 
 	return panel;
@@ -3971,6 +4016,8 @@ error:
 
 void dsi_panel_put(struct dsi_panel *panel)
 {
+	dsi_panel_sysfs_deinit(panel);
+
 	drm_panel_remove(&panel->drm_panel);
 
 	/* free resources allocated for ESD check */
