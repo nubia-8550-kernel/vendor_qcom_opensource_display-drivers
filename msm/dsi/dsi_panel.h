@@ -275,6 +275,12 @@ struct dsi_read_config {
 };
 /* add by zte for panel config end */
 
+#define BRIGHTNESS_ALPHA_PAIR_LEN 2
+struct brightness_alpha_pair {
+	u16 brightness;
+	u8 alpha;
+};
+
 struct dsi_panel {
 	const char *name;
 	const char *type;
@@ -356,6 +362,10 @@ struct dsi_panel {
 	u32 zte_lcd_thermal_max_brightness;
 	struct delayed_work dim_work;
 	struct delayed_work report_fod_in_aod_work;
+
+	struct dsi_display_refresh_rate_cmd_set nt_cmd_sets[DSI_CMD_SFM_MAX];
+	struct brightness_alpha_pair *fod_dim_lut;
+	unsigned int fod_dim_lut_len;
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
