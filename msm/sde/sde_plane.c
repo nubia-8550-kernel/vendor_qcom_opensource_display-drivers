@@ -3502,7 +3502,6 @@ static void _sde_plane_atomic_disable(struct drm_plane *plane,
 				multirect_index, SDE_SSPP_MULTIRECT_TIME_MX);
 }
 
-
 // #ifdef CONFIG_ZTE_LCD_HBM
 int sde_plane_is_fod_layer(const struct drm_plane_state *drm_state)
 {

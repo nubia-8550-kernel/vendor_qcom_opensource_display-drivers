@@ -429,4 +429,7 @@ int sde_plane_is_aod_layer(const struct drm_plane_state *drm_state);
  * @plane: Pointer to drm plane structure with the input fence we want to dump
  */
 void sde_plane_dump_input_fence(struct drm_plane *plane);
+bool sde_plane_property_is_dirty(struct drm_plane_state *plane_state,
+		uint32_t property_idx);
+
 #endif /* _SDE_PLANE_H_ */
