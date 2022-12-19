@@ -739,7 +739,7 @@ static u32 interpolate(uint32_t x, uint32_t xa, uint32_t xb,
 	return ya - (ya - yb) * (x - xa) / (xb - xa);
 }
 
-static u32 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
+static u32 dsi_panel_calc_fod_dim_alpha(struct dsi_panel *panel)
 {
 	u32 brightness = dsi_panel_get_backlight(panel);
 	int i;
@@ -762,6 +762,17 @@ static u32 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
 			   panel->fod_dim_lut[i].brightness,
 			   panel->fod_dim_lut[i - 1].alpha,
 			   panel->fod_dim_lut[i].alpha);
+}
+
+u8 dsi_panel_get_fod_dim_alpha(struct dsi_panel *panel)
+{
+	u8 alpha;
+
+	mutex_lock(&panel->panel_lock);
+	alpha = panel->fod_dim_alpha;
+	mutex_unlock(&panel->panel_lock);
+
+	return alpha;
 }
 
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
@@ -873,7 +884,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 	}
 
         if (!panel->force_fod_dim_alpha)
-	        panel->fod_dim_alpha = dsi_panel_get_fod_dim_alpha(panel);
+	        panel->fod_dim_alpha = dsi_panel_calc_fod_dim_alpha(panel);
 
 	return rc;
 }
