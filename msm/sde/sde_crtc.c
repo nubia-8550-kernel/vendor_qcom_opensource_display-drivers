@@ -1845,6 +1845,7 @@ static void _sde_crtc_setup_blend_cfg_by_stage(struct sde_crtc_mixer *mixer,
 	}
 }
 
+extern bool skipped_pcc;
 static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		struct drm_crtc_state *old_state, struct sde_crtc *sde_crtc,
 		struct sde_crtc_mixer *mixer)
@@ -2012,6 +2013,9 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		}
 		if (cstate->fod_dim_layer) {
 			cstate->fod_dim_valid = false;
+
+			if (cstate->color_invert_on && !skipped_pcc)
+                                return;
 
             		drm_atomic_crtc_for_each_plane(plane, crtc) {
 				state = plane->state;

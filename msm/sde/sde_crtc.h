@@ -573,6 +573,7 @@ struct sde_crtc_state {
 	bool aodlayer_active;
 // #endif
 	bool fod_dim_valid;
+	bool color_invert_on;
 };
 
 enum sde_crtc_irq_state {
