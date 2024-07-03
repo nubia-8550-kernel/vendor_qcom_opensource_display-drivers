@@ -572,6 +572,7 @@ struct sde_crtc_state {
 	bool hbm_mask_active;
 	bool aodlayer_active;
 // #endif
+	bool fod_dim_valid;
 };
 
 enum sde_crtc_irq_state {
