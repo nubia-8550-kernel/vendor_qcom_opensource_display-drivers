@@ -1176,6 +1176,9 @@ static int _sde_connector_update_finger_hbm_status(
 		return 0;
 	}
 
+	if (display->panel->bl_config.real_bl_level >= display->panel->bl_config.bl_hbm_level)
+	        return 0;
+
 	SDE_ATRACE_BEGIN("_sde_connector_update_finger_hbm_statuss");
         if (!c_conn->fingerlayer_dirty)
                 finger_hbm_flag = status;
