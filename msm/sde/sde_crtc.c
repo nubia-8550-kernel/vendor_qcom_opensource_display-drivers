@@ -48,6 +48,12 @@
 #include "msm_drv.h"
 #include "sde_vm.h"
 
+/*add by zte for CONFIG_ZTE_LCD_HBM begin*/
+#include "dsi_panel.h"
+extern struct dsi_panel *zte_panel;
+void sde_encoder_kickoff_update_hbm(struct drm_encoder *encoder);
+/*add by zte for CONFIG_ZTE_LCD_HBM end*/
+
 #define SDE_PSTATES_MAX (SDE_STAGE_MAX * 4)
 #define SDE_MULTIRECT_PLANE_MAX (SDE_STAGE_MAX * 2)
 
@@ -4741,7 +4747,10 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc,
 		if (encoder->crtc != crtc)
 			continue;
 
-		sde_encoder_kickoff(encoder, true);
+		if (zte_panel->hbm_need_delay)
+			sde_encoder_kickoff_update_hbm(encoder);
+		else 
+			sde_encoder_kickoff(encoder, true);
 	}
 	sde_crtc->kickoff_in_progress = false;
 
@@ -5916,6 +5925,110 @@ static int _sde_crtc_check_zpos(struct drm_crtc_state *state,
 	return rc;
 }
 
+// #ifdef CONFIG_ZTE_LCD_HBM
+bool sde_crtc_get_fingerprint_pressed(struct drm_crtc_state *crtc_state)
+{
+	struct sde_crtc_state *cstate;
+	if (!crtc_state)
+		return false;
+	cstate = to_sde_crtc_state(crtc_state);
+	return cstate->fingerprint_pressed;
+}
+
+bool sde_crtc_get_hbm_mask_active(struct drm_crtc_state *crtc_state)
+{
+	struct sde_crtc_state *cstate;
+	if (!crtc_state)
+		return false;
+	cstate = to_sde_crtc_state(crtc_state);
+	return cstate->hbm_mask_active;
+}
+
+bool sde_crtc_get_aodlayer_active(struct drm_crtc_state *crtc_state)
+{
+	struct sde_crtc_state *cstate;
+	if (!crtc_state)
+		return false;
+	cstate = to_sde_crtc_state(crtc_state);
+	return cstate->aodlayer_active;
+}
+
+static void sde_crtc_zte_layer_atomic_check(struct sde_crtc_state *cstate,
+		struct plane_state *pstates, int cnt)
+{
+	int plane_idx;
+	cstate->fingerprint_pressed = false;
+	cstate->hbm_mask_active = false;
+	cstate->aodlayer_active = false;
+	for (plane_idx = 0; plane_idx < cnt; plane_idx++) {
+		if (sde_plane_is_fod_layer(pstates[plane_idx].drm_pstate))
+			cstate->fingerprint_pressed = true;
+		if (sde_plane_is_hbm_mask_layer(pstates[plane_idx].drm_pstate))
+			cstate->hbm_mask_active = true;
+		if (sde_plane_is_aod_layer(pstates[plane_idx].drm_pstate)){
+			cstate->aodlayer_active = true;
+		}
+	}
+}
+void sde_encoder_kickoff_update_hbm(struct drm_encoder *encoder)
+{
+	bool ismask;
+	unsigned int refresh_rate = 0;
+	unsigned int us_per_frame = 0;
+	unsigned int delay_us = 0;
+	struct sde_encoder_virt *sde_enc;
+
+	if (!encoder) {
+		SDE_ERROR("msm_lcd invalid encoder\n");
+		return;
+	}
+	sde_enc = to_sde_encoder_virt(encoder);
+
+	if (sde_enc->disp_info.intf_type == DRM_MODE_CONNECTOR_DSI) {
+		ismask = sde_crtc_get_hbm_mask_active(encoder->crtc->state);
+		if (ismask != zte_panel->is_hbm_enabled) {
+		// pr_info("MSM_LCD hbm layer =%d change\n", ismask);
+			SDE_ATRACE_BEGIN("sde_vblank");
+			drm_crtc_wait_one_vblank(encoder->crtc);
+			SDE_ATRACE_END("sde_vblank");
+			if (!ismask) {
+				zte_panel->is_hbm_enabled = ismask;
+				refresh_rate = zte_panel->cur_mode->timing.refresh_rate;
+				us_per_frame = 1000000/refresh_rate;
+				if (refresh_rate == 60)
+					delay_us = (us_per_frame >> 1) + 1000;//vblank time reserved 1000us
+				else
+					delay_us = (us_per_frame >> 1);
+				usleep_range(delay_us, (delay_us + 10));
+				SDE_ATRACE_BEGIN("sde_fod_unmask");
+				zte_set_disp_parameter(ZTE_LCD_HBM_CTRL,ismask,false);
+				SDE_ATRACE_END("sde_fod_unmask");
+			}
+		}
+	}
+
+	sde_encoder_kickoff(encoder, true);
+
+	if (sde_enc->disp_info.intf_type == DRM_MODE_CONNECTOR_DSI) {
+		if (ismask != zte_panel->is_hbm_enabled) {
+			if (ismask) {
+				zte_panel->is_hbm_enabled = ismask;
+				refresh_rate = zte_panel->cur_mode->timing.refresh_rate;
+				us_per_frame = 1000000/refresh_rate;
+				if (refresh_rate == 60)
+					delay_us = (us_per_frame >> 1) + 1000;//vblank time reserved 1000us
+				else
+					delay_us = (us_per_frame >> 1);
+				usleep_range(delay_us, (delay_us + 10));
+				SDE_ATRACE_BEGIN("sde_fod_mask");
+				zte_set_disp_parameter(ZTE_LCD_HBM_CTRL,ismask,false);
+				SDE_ATRACE_END("sde_fod_mask");
+			}
+		}
+	}
+}
+// #endif
+
 static int _sde_crtc_atomic_check_pstates(struct drm_crtc *crtc,
 		struct drm_crtc_state *state,
 		struct plane_state *pstates,
@@ -5944,6 +6057,10 @@ static int _sde_crtc_atomic_check_pstates(struct drm_crtc *crtc,
 			plane, multirect_plane, &cnt);
 	if (rc)
 		return rc;
+
+// #ifdef CONFIG_ZTE_LCD_HBM
+	sde_crtc_zte_layer_atomic_check(cstate, pstates, cnt);
+// #endif
 
 	/* assign mixer stages based on sorted zpos property */
 	rc = _sde_crtc_check_zpos(state, sde_crtc, pstates, cstate, mode, cnt);
@@ -6651,6 +6768,16 @@ static void sde_crtc_install_properties(struct drm_crtc *crtc,
 				0x0, 0, ~0, 0, CRTC_PROP_FRAME_DATA_BUF);
 
 	vfree(info);
+}
+
+static bool _is_crtc_intf_mode_wb(struct drm_crtc *crtc)
+{
+	enum sde_intf_mode intf_mode = sde_crtc_get_intf_mode(crtc, crtc->state);
+
+	if ((intf_mode != INTF_MODE_WB_BLOCK) && (intf_mode != INTF_MODE_WB_LINE))
+		return false;
+
+	return true;
 }
 
 static int _sde_crtc_get_output_fence(struct drm_crtc *crtc,

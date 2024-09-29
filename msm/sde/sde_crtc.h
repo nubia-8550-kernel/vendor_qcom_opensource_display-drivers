@@ -566,6 +566,11 @@ struct sde_crtc_state {
 	bool cont_splash_populated;
 	struct sde_line_insertion_param line_insertion;
 	bool hwfence_in_fences_set;
+// #ifdef CONFIG_ZTE_LCD_HBM
+	bool fingerprint_pressed;
+	bool hbm_mask_active;
+	bool aodlayer_active;
+// #endif
 };
 
 enum sde_crtc_irq_state {
@@ -948,16 +953,6 @@ static inline bool sde_crtc_state_in_clone_mode(struct drm_encoder *encoder,
 		return true;
 
 	return false;
-}
-
-static inline bool _is_crtc_intf_mode_wb(struct drm_crtc *crtc)
-{
-	enum sde_intf_mode intf_mode = sde_crtc_get_intf_mode(crtc, crtc->state);
-
-	if ((intf_mode != INTF_MODE_WB_BLOCK) && (intf_mode != INTF_MODE_WB_LINE))
-		return false;
-
-	return true;
 }
 
 /**

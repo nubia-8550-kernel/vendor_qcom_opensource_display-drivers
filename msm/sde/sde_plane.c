@@ -3502,6 +3502,42 @@ static void _sde_plane_atomic_disable(struct drm_plane *plane,
 				multirect_index, SDE_SSPP_MULTIRECT_TIME_MX);
 }
 
+
+// #ifdef CONFIG_ZTE_LCD_HBM
+int sde_plane_is_fod_layer(const struct drm_plane_state *drm_state)
+{
+	struct sde_plane_state *pstate;
+	int rc = 0;
+	if (!drm_state)
+		return 0;
+	pstate = to_sde_plane_state(drm_state);
+    rc = sde_plane_get_property(pstate, PLANE_PROP_FOD);
+	return rc;
+}
+
+int sde_plane_is_hbm_mask_layer(const struct drm_plane_state *drm_state)
+{
+	struct sde_plane_state *pstate;
+	int rc = 0;
+	if (!drm_state)
+		return 0;
+	pstate = to_sde_plane_state(drm_state);
+    rc = sde_plane_get_property(pstate, PLANE_PROP_HBM_MASK);
+	return rc;
+}
+
+int sde_plane_is_aod_layer(const struct drm_plane_state *drm_state)
+{
+	struct sde_plane_state *pstate;
+	int rc = 0;
+	if (!drm_state)
+		return 0;
+	pstate = to_sde_plane_state(drm_state);
+    rc = sde_plane_get_property(pstate, PLANE_PROP_AOD);
+	return rc;
+}
+// #endif
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 static void _sde_plane_atomic_update(struct drm_plane *plane,
 				struct drm_plane_state *old_state)
@@ -3958,6 +3994,15 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 
 	msm_property_install_range(&psde->property_info, "alpha",
 		0x0, 0, 255, 255, PLANE_PROP_ALPHA);
+
+// #ifdef CONFIG_ZTE_LCD_HBM
+	msm_property_install_range(&psde->property_info, "zte_fod_layer",
+		0x0, 0, INT_MAX, 0, PLANE_PROP_FOD);
+	msm_property_install_range(&psde->property_info, "zte_hbm_layer",
+		0x0, 0, INT_MAX, 0, PLANE_PROP_HBM_MASK);
+	msm_property_install_range(&psde->property_info, "zte_aod_layer",
+		0x0, 0, INT_MAX, 0, PLANE_PROP_AOD);
+// #endif
 
 	/* linux default file descriptor range on each process */
 	msm_property_install_range(&psde->property_info, "input_fence",

@@ -124,6 +124,11 @@ enum msm_mdp_plane_property {
 
 	/* range properties */
 	PLANE_PROP_ZPOS = PLANE_PROP_BLOBCOUNT,
+//#ifdef CONFIG_ZTE_LCD_HBM
+	PLANE_PROP_FOD,
+	PLANE_PROP_HBM_MASK,
+	PLANE_PROP_AOD,
+//#endif
 	PLANE_PROP_ALPHA,
 	PLANE_PROP_COLOR_FILL,
 	PLANE_PROP_H_DECIMATE,
@@ -1422,6 +1427,12 @@ static inline void __init sde_rsc_rpmh_register(void)
 {
 }
 #endif /* CONFIG_DRM_SDE_RSC */
+#if IS_ENABLED(CONFIG_NUBIA_DP)
+int __init nubia_dp_preference_init(void);
+void __exit nubia_dp_preference_exit(void);
+int __init nubia_usb_switch_dp_init(void);
+void __exit nubia_usb_switch_dp_exit(void);
+#endif
 
 #if IS_ENABLED(CONFIG_DRM_SDE_WB)
 void __init sde_wb_register(void);

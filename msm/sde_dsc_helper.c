@@ -9,8 +9,13 @@
 #include "sde_dsc_helper.h"
 #include "sde_kms.h"
 
+/*add by zte for PQ82A02T nt377705 for dsc 1.1 begin*/
+#include "dsi_panel.h"
+extern struct dsi_panel *zte_panel;
+/*add by zte for PQ82A02T nt377705 for dsc 1.1 end*/
 
 #define SDE_DSC_PPS_SIZE       128
+
 
 enum sde_dsc_ratio_type {
 	DSC_V11_8BPC_8BPP,
@@ -280,6 +285,14 @@ int sde_dsc_populate_dsc_config(struct drm_dsc_config *dsc, int scr_ver) {
 
 	for (i = 0; i < DSC_NUM_BUF_RANGES - 1; i++)
 		dsc->rc_buf_thresh[i] = sde_dsc_rc_buf_thresh[i];
+/*add by zte for PQ82A02T nt377705 for dsc 1.1 begin*/
+	if (zte_panel) {
+		if (!strcmp(zte_panel->name, "BF068_NT377705_Full_Screen_DSC_FHD_6P78Inch")) {
+			sde_dsc_rc_range_bpg[ratio_idx][11] = -10;
+			SDE_INFO("msm_lcd force sde_dsc_rc_range_bpg[DSC_V11_8BPC_8BPP][11]=-10\n");
+		}
+	}
+/*add by zte for PQ82A02T nt377705 for dsc 1.1 end*/
 
 	for (i = 0; i < DSC_NUM_BUF_RANGES; i++) {
 		dsc->rc_range_params[i].range_min_qp =

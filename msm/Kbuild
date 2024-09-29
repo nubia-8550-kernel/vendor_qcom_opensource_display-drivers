@@ -27,8 +27,14 @@ ifeq ($(CONFIG_ARCH_QTI_VM), y)
         include $(DISPLAY_ROOT)/config/gki_kalamadisptui.conf
         LINUX_INC += -include $(DISPLAY_ROOT)/config/gki_kalamadisptuiconf.h
 else
+$(warning "CONFIG_ZTE_BOARD_NAME:$(CONFIG_ZTE_BOARD_NAME)")
+ifeq ($(strip $(CONFIG_ZTE_BOARD_NAME)),"trega")
+	include $(DISPLAY_ROOT)/config/gki_kalamadisp_trega.conf
+	LINUX_INC += -include $(DISPLAY_ROOT)/config/gki_kalamadispconf_trega.h
+else
 	include $(DISPLAY_ROOT)/config/gki_kalamadisp.conf
 	LINUX_INC += -include $(DISPLAY_ROOT)/config/gki_kalamadispconf.h
+endif
 endif
 endif
 
@@ -50,6 +56,7 @@ LINUX_INC +=	-I$(DISPLAY_ROOT) \
 	-I$(DISPLAY_ROOT)/msm/dp \
 	-I$(DISPLAY_ROOT)/msm/dsi \
 	-I$(DISPLAY_ROOT)/msm/sde \
+	-I$(DISPLAY_ROOT)/msm/nubiadp \
 	-I$(DISPLAY_ROOT)/include/uapi/display \
 
 CDEFINES +=	-DANI_LITTLE_BYTE_ENDIAN \
@@ -141,6 +148,9 @@ msm_drm-$(CONFIG_DRM_MSM_DP) += dp/dp_altmode.o \
 				dp/dp_pll.o \
 				dp/dp_pll_5nm.o \
 				dp/dp_pll_4nm.o
+
+msm_drm-$(CONFIG_NUBIA_DP) += nubiadp/nubia_dp_preference.o \
+				nubiadp/usb_switch_dp.o
 
 msm_drm-$(CONFIG_DRM_MSM_DP_MST) += dp/dp_mst_drm.o
 
@@ -239,6 +249,12 @@ msm_drm-$(CONFIG_DRM_MSM) += msm_atomic.o \
 			     msm_gem_vma.o \
 			     msm_smmu.o \
 			     msm_prop.o
+
+msm_drm-$(CONFIG_DRM_MSM) += zte_disp/zte_lcd_common.o \
+                             zte_disp/zte_lcd_reg_debug.o \
+							 zte_disp/zte_disp_panel.o \
+							 zte_disp/zte_disp_zlog.o \
+							 zte_disp/zte_disp_sde.o
 
 CDEFINES += -DBUILD_TIMESTAMP=\"$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')\"
 

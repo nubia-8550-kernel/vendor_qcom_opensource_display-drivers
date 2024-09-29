@@ -141,12 +141,22 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 		brightness = 0;
 
 	display = (struct dsi_display *) c_conn->display;
+	/*add by zte for bl_limit begin*/
+	if (display->panel->disp_feature->zte_lcd_bl_limit_feature_enable) {
+		if (brightness > display->panel->disp_feature->zte_lcd_bl_limit) {
+			SDE_INFO("MSM_LCD brightness=%d force to zte_lcd_bl_limit=%d\n", brightness, display->panel->disp_feature->zte_lcd_bl_limit);
+			brightness = display->panel->disp_feature->zte_lcd_bl_limit;
+		}
+	}
+	/*add by zte for bl_limit end*/
+
 	if (brightness > display->panel->bl_config.brightness_max_level)
 		brightness = display->panel->bl_config.brightness_max_level;
 	if (brightness > c_conn->thermal_max_brightness)
 		brightness = c_conn->thermal_max_brightness;
 
 	display->panel->bl_config.brightness = brightness;
+	display->panel->zte_lcd_thermal_max_brightness = c_conn->thermal_max_brightness; // add by zte for bl_limit
 	/* map UI brightness into driver backlight level with rounding */
 	bl_lvl = mult_frac(brightness, display->panel->bl_config.bl_max_level,
 			display->panel->bl_config.brightness_max_level);
@@ -240,7 +250,7 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 	props.type = BACKLIGHT_RAW;
 	props.power = FB_BLANK_UNBLANK;
 	props.max_brightness = bl_config->brightness_max_level;
-	props.brightness = bl_config->brightness_max_level;
+	props.brightness = bl_config->brightness_max_level / 2; //modify by zte bl_config->brightness_max_level
 	snprintf(bl_node_name, BL_NODE_NAME_SIZE, "panel%u-backlight",
 							display_count);
 	c_conn->bl_device = backlight_device_register(bl_node_name, dev->dev, c_conn,
@@ -909,6 +919,138 @@ void sde_connector_complete_qsync_commit(struct drm_connector *conn,
 		SDE_EVT32(conn->base.id, c_conn->qsync_mode);
 	}
 }
+
+// #ifdef CONFIG_ZTE_LCD_HBM
+extern bool sde_crtc_get_hbm_mask_active(struct drm_crtc_state *crtc_state);
+extern bool sde_crtc_get_fingerprint_pressed(struct drm_crtc_state *crtc_state);
+extern bool sde_crtc_get_aodlayer_active(struct drm_crtc_state *crtc_state);
+int sde_connector_update_hbm(struct drm_connector *connector)
+{
+	struct sde_connector *c_conn = to_sde_connector(connector);
+	struct dsi_display *dsi_display;
+	struct dsi_panel *panel;
+	struct sde_connector_state *c_state;
+	struct drm_crtc *crtc;
+	bool ismask, isfod, isaod;
+	int rc = 0;
+	static u32 spr_status;
+
+	if (!c_conn) {
+		SDE_ERROR("Invalid params sde_connector null\n");
+		return -EINVAL;
+	}
+
+	if (c_conn->connector_type != DRM_MODE_CONNECTOR_DSI)
+		return 0;
+
+	c_state = to_sde_connector_state(connector->state);
+	dsi_display = c_conn->display;
+	if (!dsi_display || !dsi_display->panel) {
+		SDE_ERROR("Invalid params(s) dsi_display %pK, panel %pK\n",
+			dsi_display,
+			((dsi_display) ? dsi_display->panel : NULL));
+		return -EINVAL;
+	}
+
+	panel = dsi_display->panel;
+
+	if (!c_conn->encoder || !c_conn->encoder->crtc ||
+	    !c_conn->encoder->crtc->state) {
+		return 0;
+	}
+
+	crtc = c_conn->encoder->crtc;
+	ismask = sde_crtc_get_hbm_mask_active(c_conn->encoder->crtc->state);
+	if (ismask != panel->is_hbm_enabled) {
+		if (!panel->hbm_need_delay) {
+			panel->is_hbm_enabled = ismask;
+			SDE_ATRACE_BEGIN("sde_hbm");
+			sde_encoder_wait_for_event(c_conn->encoder, MSM_ENC_VBLANK);
+			zte_set_disp_parameter(ZTE_LCD_HBM_CTRL,ismask,false);
+			if (panel->cur_mode->timing.refresh_rate == 144) {
+				drm_crtc_wait_one_vblank(crtc);
+			}
+			SDE_ATRACE_END("sde_hbm");
+		}
+	}
+
+	isfod = sde_crtc_get_fingerprint_pressed(c_conn->encoder->crtc->state);
+	if (isfod != panel->fod_layer) {
+		if (isfod) {
+			if (ismask) {
+				if (panel->in_aod) {
+					schedule_delayed_work(&panel->report_fod_in_aod_work, msecs_to_jiffies(50));
+				} else {
+					panel->fod_layer = isfod;
+					zte_panel_hbm_send_uevent(LCD_STATUS_HBM_FG_PRESS_EVENT,0);
+				}
+			}
+		} else {
+			panel->fod_layer = isfod;
+			zte_panel_hbm_send_uevent(LCD_STATUS_HBM_FG_RELEASE_EVENT,0);
+		}
+	}
+
+	isaod = sde_crtc_get_aodlayer_active(c_conn->encoder->crtc->state);
+	if (isaod != panel->aod_layer) {
+		pr_info("MSM_LCD aod layer =%d changed\n", isaod);
+		panel->aod_layer = isaod;
+		if (isaod) {
+			if (panel->in_aod) {
+				if (atomic_read(&panel->aod_entering)){
+					atomic_dec(&panel->aod_entering);
+				} else {
+					if (!panel->hbm_need_delay) {
+						sde_encoder_wait_for_event(c_conn->encoder, MSM_ENC_VBLANK);
+					}
+					rc = zte_set_disp_parameter(ZTE_LCD_AOD_BL, panel->disp_feature->zte_lcd_aod_bl, false);
+					if (!rc)
+						atomic_inc(&panel->aod_entering);
+				}
+			} else {
+				pr_info("MSM_LCD do not set aod bl when aod layer is active but panel is not in aod\n");
+			}
+			/* fix aod layer off-on-off wrong seq to restore bl*/
+			if (atomic_read(&panel->aod_exiting))
+					atomic_dec(&panel->aod_exiting);
+		} else {
+			if (panel->in_aod) {
+				pr_info("MSM_LCD don't restore backlight when aod layer is disappear but panel in aod\n");
+			} else {
+				if (atomic_read(&panel->aod_exiting)){
+					atomic_dec(&panel->aod_exiting);
+				} else {
+					if (!panel->hbm_need_delay) {
+						sde_encoder_wait_for_event(c_conn->encoder, MSM_ENC_VBLANK);
+					}
+					rc = zte_set_disp_parameter(ZTE_LCD_RECOVERY_BL, panel->saved_backlight, false);
+					if (!rc)
+						atomic_inc(&panel->aod_exiting);
+				}
+			}
+		}
+	}
+
+	if (spr_status != panel->disp_feature->zte_lcd_spr) {
+		spr_status = panel->disp_feature->zte_lcd_spr;
+		SDE_ATRACE_BEGIN("sde_spr_blank");
+		sde_encoder_wait_for_event(c_conn->encoder, MSM_ENC_VBLANK);
+		if (panel->cur_mode->timing.refresh_rate == 90 && spr_status) {
+			usleep_range(10350,10380);
+		}
+		SDE_ATRACE_END("sde_spr_blank");
+		pr_info("MSM_LCD send spr %d\n", spr_status);
+		SDE_ATRACE_BEGIN("sde_spr");
+		if (spr_status) {
+			zte_set_disp_parameter(ZTE_LCD_SPR_CTRL, spr_status, false);
+		} else {
+			zte_set_disp_parameter(ZTE_LCD_SPR_CTRL, spr_status, false);
+		}
+		SDE_ATRACE_END("sde_spr");
+	}
+	return 0;
+}
+// #endif
 
 static int _sde_connector_update_hdr_metadata(struct sde_connector *c_conn,
 		struct sde_connector_state *c_state)

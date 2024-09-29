@@ -10,6 +10,9 @@
 #include "sde_core_irq.h"
 #include "sde_formats.h"
 #include "sde_trace.h"
+/* add by zte lcd for vsync info begin*/
+// #include "../zte_disp/zte_disp_sde.h"
+/* add by zte lcd for vsync info end*/
 
 #define SDE_DEBUG_CMDENC(e, fmt, ...) SDE_DEBUG("enc%d intf%d " fmt, \
 		(e) && (e)->base.parent ? \
@@ -321,9 +324,16 @@ static void sde_encoder_phys_cmd_te_rd_ptr_irq(void *arg, int irq_idx)
 	if (!phys_enc || !phys_enc->hw_pp || !phys_enc->hw_intf || !phys_enc->hw_ctl)
 		return;
 
+    /* add by zte lcd for vsync info begin*/
+    // zte_sde_encoder_save_vsync_info(phys_enc);
+	/* add by zte lcd for vsync info end*/
+
 	SDE_ATRACE_BEGIN("rd_ptr_irq");
 	cmd_enc = to_sde_encoder_phys_cmd(phys_enc);
 	ctl = phys_enc->hw_ctl;
+
+	if (!ctl)
+		return;
 
 	if (ctl->ops.get_scheduler_status)
 		scheduler_status = ctl->ops.get_scheduler_status(ctl);
