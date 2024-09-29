@@ -4749,6 +4749,9 @@ static int _sde_encoder_prepare_for_kickoff_processing(struct drm_encoder *drm_e
 	return ret;
 }
 
+// #ifdef CONFIG_ZTE_LCD_HBM
+extern int sde_connector_update_hbm(struct drm_connector *connector);
+// #endif
 int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 		struct sde_encoder_kickoff_params *params)
 {
@@ -4777,6 +4780,11 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 	SDE_EVT32(DRMID(drm_enc));
 
 	cur_master = sde_enc->cur_master;
+// #ifdef CONFIG_ZTE_LCD_HBM
+	if (cur_master) {
+		sde_connector_update_hbm(cur_master->connector);
+	}
+// #endif
 	is_cmd_mode = sde_encoder_check_curr_mode(drm_enc, MSM_DISPLAY_CMD_MODE);
 	if (cur_master && cur_master->connector)
 		sde_enc->frame_trigger_mode =

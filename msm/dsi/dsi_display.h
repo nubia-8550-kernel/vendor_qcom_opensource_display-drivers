@@ -20,6 +20,10 @@
 #include "dsi_ctrl.h"
 #include "dsi_phy.h"
 #include "dsi_panel.h"
+#include "../zte_disp/zte_lcd_common.h"
+#ifdef CONFIG_ZTE_LCD_ZLOG
+#include <../../../../drivers/vendor/common/zlog/zlog_common/zlog_common.h>
+#endif
 
 #define MAX_DSI_CTRLS_PER_DISPLAY             2
 #define DSI_CLIENT_NAME_SIZE		20
@@ -843,5 +847,8 @@ bool dsi_display_mode_match(const struct dsi_display_mode *mode1,
  * Return: error code
  */
 int dsi_display_update_transfer_time(void *display, u32 transfer_time);
-
+/* add by zte lcd for display get start */
+struct dsi_display *get_main_display(void);
+/* add by zte lcd for display get end */
+void zte_dsi_display_register_fps_irq(struct dsi_panel *panel);/*add by zte lcd for fps gpio irq*/
 #endif /* _DSI_DISPLAY_H_ */

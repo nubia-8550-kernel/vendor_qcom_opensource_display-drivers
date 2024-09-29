@@ -418,6 +418,11 @@ void sde_plane_static_img_control(struct drm_plane *plane,
 		enum sde_sys_cache_state state, enum sde_sys_cache_type type);
 
 void sde_plane_add_data_to_minidump_va(struct drm_plane *plane);
+// #ifdef CONFIG_ZTE_LCD_HBM
+int sde_plane_is_fod_layer(const struct drm_plane_state *drm_state);
+int sde_plane_is_hbm_mask_layer(const struct drm_plane_state *drm_state);
+int sde_plane_is_aod_layer(const struct drm_plane_state *drm_state);
+// #endif
 
 /**
  * sde_plane_dump_input_fence - dumps plane input fence info

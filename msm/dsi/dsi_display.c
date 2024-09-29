@@ -22,6 +22,8 @@
 #include "dsi_pwr.h"
 #include "sde_dbg.h"
 #include "dsi_parser.h"
+#include "sde_encoder.h" //add by zte lcd
+#include <drm/drm_vblank.h>
 
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 #define INT_BASE_10 10
@@ -36,6 +38,11 @@
 
 #define DSI_CLOCK_BITRATE_RADIX 10
 #define MAX_TE_SOURCE_ID  2
+
+/* add by zte lcd for dsplay get start*/
+static struct dsi_display *primary_display;
+/* add by zte lcd for dsplay get end*/
+
 
 #define SEC_PANEL_NAME_MAX_LEN  256
 
@@ -600,6 +607,12 @@ static bool dsi_display_validate_reg_read(struct dsi_panel *panel)
 				config->status_value[group + i]) {
 				DRM_ERROR("mismatch: 0x%x\n",
 						config->return_buf[i]);
+				#ifdef CONFIG_ZTE_LCD_ZLOG
+					if (panel->disp_feature->zlog_lcd_client) {
+						zlog_client_record(panel->disp_feature->zlog_lcd_client, "%s: Warning: esd read value mismatch!\n",__func__);
+						zlog_client_notify(panel->disp_feature->zlog_lcd_client, ZLOG_LCD_ESD_CHECK_ERROR_NO);
+					}
+				#endif
 				break;
 			}
 		}
@@ -835,6 +848,104 @@ static int dsi_display_validate_status(struct dsi_display_ctrl *ctrl,
 exit:
 	return rc;
 }
+
+/* add by zte lcd begin for reg read */
+int dsi_panel_read_cmd_set(struct dsi_panel *panel,
+				struct dsi_read_config *read_config)
+{
+	struct mipi_dsi_host *host;
+	struct dsi_display *display;
+	struct dsi_display_ctrl *ctrl;
+	struct dsi_cmd_desc *cmds;
+	enum dsi_cmd_set_state state;
+	int i, rc = 0, count = 0;
+	u32 flags = 0;
+
+	if (panel == NULL || read_config == NULL)
+		return -EINVAL;
+
+	host = panel->host;
+	if (host) {
+		display = to_dsi_display(host);
+		if (display == NULL)
+			return -EINVAL;
+	} else
+		return -EINVAL;
+
+	if (!panel->panel_initialized) {
+		pr_info("Panel not initialized\n");
+		return -EINVAL;
+	}
+
+	if (!read_config->is_read) {
+		pr_info("read operation was not permitted\n");
+		return -EPERM;
+	}
+
+	dsi_display_clk_ctrl(display->dsi_clk_handle,
+		DSI_ALL_CLKS, DSI_CLK_ON);
+
+	ctrl = &display->ctrl[display->cmd_master_idx];
+
+	rc = dsi_display_cmd_engine_enable(display);
+	if (rc) {
+		pr_err("cmd engine enable failed\n");
+		rc = -EPERM;
+		goto exit_ctrl;
+	}
+
+	if (display->tx_cmd_buf == NULL) {
+		rc = dsi_host_alloc_cmd_tx_buffer(display);
+		if (rc) {
+			pr_err("failed to allocate cmd tx buffer memory\n");
+			goto exit;
+		}
+	}
+
+	count = read_config->read_cmd.count;
+	cmds = read_config->read_cmd.cmds;
+	state = read_config->read_cmd.state;
+
+	if (count == 0) {
+		pr_err("No commands to be sent\n");
+		goto exit;
+	}
+
+	flags = DSI_CTRL_CMD_READ;
+
+	if (state == DSI_CMD_SET_STATE_LP)
+		cmds->msg.flags |= MIPI_DSI_MSG_USE_LPM;
+
+	memset(read_config->rbuf, 0x0, sizeof(read_config->rbuf));
+    cmds->msg.flags |= MIPI_DSI_MSG_UNICAST_COMMAND;
+	cmds->msg.rx_buf = read_config->rbuf;
+	cmds->msg.rx_len = read_config->cmds_rlen;
+    cmds->ctrl_flags = flags;
+	dsi_display_set_cmd_tx_ctrl_flags(display, cmds);
+	rc = dsi_ctrl_transfer_prepare(ctrl->ctrl, cmds->ctrl_flags);
+	if (rc) {
+		DSI_ERR("prepare for rx cmd transfer failed rc=%d\n", rc);
+		return rc;
+	}
+	rc = dsi_ctrl_cmd_transfer(ctrl->ctrl, cmds);
+	if (rc <= 0) {
+		pr_err("rx cmd transfer failed rc=%d\n", rc);
+		goto exit;
+	}
+    dsi_ctrl_transfer_unprepare(ctrl->ctrl, cmds->ctrl_flags);
+	/* for debug log */
+	for (i = 0; i < read_config->cmds_rlen; i++)
+		pr_debug("[%d] = 0x%02X\n", i, read_config->rbuf[i]);
+
+exit:
+	dsi_display_cmd_engine_disable(display);
+exit_ctrl:
+	dsi_display_clk_ctrl(display->dsi_clk_handle,
+		DSI_ALL_CLKS, DSI_CLK_OFF);
+
+	return rc;
+}
+/* add by zte lcd begin for reg end*/
 
 static int dsi_display_status_reg_read(struct dsi_display *display)
 {
@@ -1346,17 +1457,68 @@ int dsi_display_set_power(struct drm_connector *connector,
 	switch (power_mode) {
 	case SDE_MODE_DPMS_LP1:
 		rc = dsi_panel_set_lp1(display->panel);
+		display->panel->in_aod = true;
+		atomic_set(&display->panel->aod_exiting, 0);
+		pr_info("MSM_LCD Enter LP1\n");
+		if (display->panel->aod_layer) {
+			if (atomic_read(&display->panel->aod_entering)){
+                atomic_dec(&display->panel->aod_entering);
+			} else {
+                zte_set_disp_parameter(ZTE_LCD_AOD_BL,
+		                       display->panel->disp_feature->zte_lcd_aod_bl, false);
+			    atomic_inc(&display->panel->aod_entering);
+			}
+		} else {
+			pr_info("MSM_LCD do not set aod bl when panel aod is ready but aod layer is not active\n");
+		}
 		break;
 	case SDE_MODE_DPMS_LP2:
 		rc = dsi_panel_set_lp2(display->panel);
+		display->panel->in_aod = true;
+		pr_info("MSM_LCD Enter LP2\n");
 		break;
 	case SDE_MODE_DPMS_ON:
 		if ((display->panel->power_mode == SDE_MODE_DPMS_LP1) ||
-			(display->panel->power_mode == SDE_MODE_DPMS_LP2))
-			rc = dsi_panel_set_nolp(display->panel);
+			(display->panel->power_mode == SDE_MODE_DPMS_LP2)) {
+			   if (atomic_read(&display->panel->skip_nolp)) {
+				   atomic_dec(&display->panel->skip_nolp);
+				   if (display->panel->is_hbm_enabled || display->panel->disp_feature->zte_lcd_hbm) {
+					   rc = dsi_panel_set_hbm_on(display->panel);
+					   pr_info("MSM_LCD set hbm on again to avoid bl not real!\n");
+				   }
+                   pr_info("MSM_LCD skip nolp cmds when DSI_CMD_SET_ZTE_AOD_OFF_HBM_ON was set\n");
+			   } else {
+				   rc = dsi_panel_set_nolp(display->panel);
+			   }
+			   if (display->panel->aod_layer) {
+				   pr_info("MSM_LCD don't restore backlight when aod layer is active but in nolp status\n");
+			   } else {
+				    if (atomic_read(&display->panel->aod_exiting)){
+                        atomic_dec(&display->panel->aod_exiting);
+				    } else {
+						atomic_inc(&display->panel->aod_exiting);
+                        zte_set_disp_parameter(ZTE_LCD_RECOVERY_BL,
+		                       display->panel->saved_backlight, false);
+					}
+			   }
+               atomic_set(&display->panel->aod_entering, 0);
+			}
+		display->panel->in_aod = false;
+		pr_info("MSM_LCD SDE_MODE_DPMS_ON\n");
 		break;
 	case SDE_MODE_DPMS_OFF:
 	default:
+		display->panel->disp_feature->zte_panel_state = SDE_MODE_DPMS_OFF;
+		display->panel->in_aod = false;
+		atomic_set(&display->panel->aod_entering, 0);
+		atomic_set(&display->panel->aod_exiting, 0);
+/*add by zte lcd for irq_fps gpio irq begin*/
+		if (display->panel->disp_feature->zte_lcd_fps_irq_gpio_feature_enable) {
+			zte_set_disp_parameter(ZTE_LCD_SECOND_IRQ_FPS, 0, false); //add by zte for irq_fps must when panel_initialized
+		}
+/*add by zte lcd for irq_fps gpio irq end*/
+
+		pr_info("MSM_LCD SDE_MODE_DPMS_OFF\n");
 		return rc;
 	}
 
@@ -4119,6 +4281,7 @@ static int dsi_display_get_phandle_count(struct dsi_display *display,
 				propname);
 }
 
+extern struct device *dsi_uevent_device;
 static int dsi_display_parse_dt(struct dsi_display *display)
 {
 	int i, rc = 0;
@@ -4129,6 +4292,8 @@ static int dsi_display_parse_dt(struct dsi_display *display)
 	if (!strcmp(display->display_type, "primary")) {
 		dsi_ctrl_name = "qcom,dsi-ctrl-num";
 		dsi_phy_name = "qcom,dsi-phy-num";
+		/* add by zte lcd for uevent */
+		dsi_uevent_device = &display->pdev->dev;
 	} else {
 		dsi_ctrl_name = "qcom,dsi-sec-ctrl-num";
 		dsi_phy_name = "qcom,dsi-sec-phy-num";
@@ -6072,6 +6237,11 @@ int dsi_display_dev_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, display);
 
+    /* add by zte lcd for display get start */
+	if (!strcmp(display->display_type, "primary"))
+		primary_display = display;
+	/* add by zte lcd for display get end */
+
 	if (!dsi_display_validate_res(display)) {
 		rc = -EPROBE_DEFER;
 		DSI_ERR("resources required for display probe not present: rc=%d\n", rc);
@@ -6108,6 +6278,12 @@ end:
 
 	return rc;
 }
+
+/* add by zte lcd for display get start */
+struct dsi_display *get_main_display(void) {
+		return primary_display;
+}
+/* add by zte lcd for display get end */
 
 int dsi_display_dev_remove(struct platform_device *pdev)
 {
@@ -7111,6 +7287,12 @@ int dsi_display_get_modes_helper(struct dsi_display *display,
 			return rc;
 		}
 
+		if(display->panel->host_config.dst_format == DSI_PIXEL_FORMAT_RGB101010 &&
+			display_mode.timing.dsc_enabled) {
+				display->panel->host_config.dst_format = DSI_PIXEL_FORMAT_RGB888;
+				DSI_DEBUG("MSM_LCD change pixel %d to %d", DSI_PIXEL_FORMAT_RGB101010, DSI_PIXEL_FORMAT_RGB888);
+			}
+
 		if (display->cmdline_timing == display_mode.mode_idx) {
 			topology_override = display->cmdline_topology;
 			is_preferred = true;
@@ -7823,6 +8005,12 @@ int dsi_display_set_mode(struct dsi_display *display,
 	rc = dsi_display_set_mode_sub(display, &adj_mode, flags);
 	if (rc) {
 		DSI_ERR("[%s] failed to set mode\n", display->name);
+		#ifdef CONFIG_ZTE_LCD_ZLOG
+			if (display->panel->disp_feature->zlog_lcd_client) {
+				zlog_client_record(display->panel->disp_feature->zlog_lcd_client, "%s: Warning: dsi mode set error!\n",__func__);
+				zlog_client_notify(display->panel->disp_feature->zlog_lcd_client, ZLOG_LCD_CHANGE_FPS_ERROR_NO);
+			}
+		#endif
 		goto error;
 	}
 
@@ -7830,6 +8018,13 @@ int dsi_display_set_mode(struct dsi_display *display,
 			adj_mode.priv_info->mdp_transfer_time_us,
 			timing.h_active, timing.v_active, timing.refresh_rate,
 			adj_mode.priv_info->clk_rate_hz);
+	/* add by zte for fps reading begin*/
+	display->panel->disp_feature->zte_lcd_cur_fps = timing.refresh_rate;
+	if (display->panel->panel_mode == DSI_OP_VIDEO_MODE) {
+		DSI_INFO("msm_lcd DSI_OP_VIDEO_MODE fps send uevent\n");
+		zte_panel_fps_send_uevent(timing.refresh_rate);
+	}
+	/* add by zte for fps reading end*/
 	SDE_EVT32(adj_mode.priv_info->mdp_transfer_time_us,
 			timing.h_active, timing.v_active, timing.refresh_rate,
 			adj_mode.priv_info->clk_rate_hz);
@@ -7948,6 +8143,12 @@ static void dsi_display_handle_fifo_underflow(struct work_struct *work)
 	}
 
 	DSI_INFO("handle DSI FIFO underflow error\n");
+#ifdef CONFIG_ZTE_LCD_ZLOG
+	if (display->panel->disp_feature->zlog_lcd_client) {
+		zlog_client_record(display->panel->disp_feature->zlog_lcd_client, "%s: Warning: dsi underflow!\n",__func__);
+		zlog_client_notify(display->panel->disp_feature->zlog_lcd_client, ZLOG_LCD_FRAME_UNDERFLOW_NO);
+	}
+#endif
 	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);
 
 	dsi_display_clk_ctrl(display->dsi_clk_handle,
@@ -8336,6 +8537,12 @@ int dsi_display_prepare(struct dsi_display *display)
 			if (rc) {
 				DSI_ERR("[%s] panel prepare failed, rc=%d\n",
 						display->name, rc);
+				#ifdef CONFIG_ZTE_LCD_ZLOG
+				    if (display->panel->disp_feature->zlog_lcd_client) {
+						zlog_client_record(display->panel->disp_feature->zlog_lcd_client, "%s: to process dsi_panel_prepare\n",__func__);
+			            zlog_client_notify(display->panel->disp_feature->zlog_lcd_client, ZLOG_LCD_PANEL_PREPARE_ERROR_NO);
+					}
+				#endif
 				goto error_ctrl_link_off;
 			}
 		}
@@ -9103,6 +9310,189 @@ int dsi_display_unprepare(struct dsi_display *display)
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
 	return rc;
 }
+
+/*add by zte lcd for wait one blank begin*/
+int zte_wait_one_blank(void) {
+	struct dsi_display *display = get_main_display();
+	struct drm_connector *conn = display->drm_conn;
+	struct dsi_panel *panel = display->panel;
+
+	int rc = 0;
+
+	if (!panel) {
+		pr_err("failed to find display panel\n");
+		return -EINVAL;
+	}
+
+	if (!dsi_panel_initialized(panel)) {
+		pr_err("dsi_panel_aod_low_light_mode is not init\n");
+		return -EINVAL;
+	}
+
+	sde_encoder_wait_for_event(conn->encoder, MSM_ENC_VBLANK);
+
+	return rc;
+}
+
+int zte_wait_for_spr(void) {
+	struct dsi_display *display = get_main_display();
+	struct drm_connector *conn = display->drm_conn;
+	struct dsi_panel *panel = display->panel;
+	struct drm_crtc *crtc;
+	int rc = 0;
+
+	if (!panel) {
+		pr_err("failed to find display panel\n");
+		return -EINVAL;
+	}
+
+	if (!dsi_panel_initialized(panel)) {
+		pr_err("dsi_panel_aod_low_light_mode is not init\n");
+		return -EINVAL;
+	}
+
+	if (!conn->encoder || !conn->encoder->crtc ||
+	    !conn->encoder->crtc->state) {
+		return 0;
+	}
+
+	crtc = conn->encoder->crtc;
+	sde_encoder_wait_for_event(conn->encoder, MSM_ENC_VBLANK);
+	drm_crtc_wait_one_vblank(crtc);
+	return rc;
+}
+/*add by zte lcd for wait one blank end*/
+
+/*add by zte lcd for irq_fps gpio irq begin*/
+void zte_dsi_display_change_fps_irq_status(struct dsi_panel *panel, bool enable)
+{
+	unsigned int lcd_fps_irq;
+
+	if (!panel) {
+		DSI_ERR("msm_lcd irq_fps Invalid params\n");
+		return;
+	}
+
+	if (!gpio_is_valid(panel->disp_feature->zte_lcd_fps_irq_gpio)) {
+		DSI_ERR("msm_lcd irq_fps Invalid gpio\n");
+		return;
+	}
+
+	lcd_fps_irq = gpio_to_irq(panel->disp_feature->zte_lcd_fps_irq_gpio);
+
+	/* Handle unbalanced irq enable/disable calls */
+	if (lcd_fps_irq) {
+		if (enable && !panel->disp_feature->zte_lcd_fps_irq_intr_enable) {
+			//enable_irq_wake(lcd_fps_irq);
+			enable_irq(lcd_fps_irq);
+			panel->disp_feature->zte_lcd_fps_irq_intr_enable = true;
+			DSI_INFO("msm_lcd irq_fps GPIO enabled\n");
+		} else if (!enable && panel->disp_feature->zte_lcd_fps_irq_intr_enable) {
+			//disable_irq_wake(lcd_fps_irq);
+			disable_irq(lcd_fps_irq);
+			panel->disp_feature->zte_lcd_fps_irq_intr_enable = false;
+			panel->disp_feature->zte_last_fps_time = 0;
+			DSI_INFO("msm_lcd irq_fps GPIO don't enabled\n");
+		}
+	}
+}
+
+static irqreturn_t zte_dsi_display_fps_irq_handler(int irq, void *data)
+{
+	static u32 fps_count = 0;
+	u32 zte_fps_time = 0;
+	u32 zte_diff_fps_time = 0;
+	struct dsi_display *display = (struct dsi_display *)data;
+
+	zte_fps_time = ktime_get();
+	if (display->panel->disp_feature->zte_last_fps_time != 0 && fps_count > 1) {
+		if(display->panel->disp_feature->zte_last_fps_time > zte_fps_time) {
+			zte_diff_fps_time = (u32)((0xffffffff - display->panel->disp_feature->zte_last_fps_time + zte_fps_time) / 1000);
+		} else {
+			zte_diff_fps_time = ktime_us_delta(zte_fps_time, display->panel->disp_feature->zte_last_fps_time);
+		}
+		display->panel->disp_feature->zte_get_irq_fps = (u16)(10000000 / zte_diff_fps_time);
+		//display->panel->disp_feature->zte_get_irq_fps = (display->panel->disp_feature->zte_get_irq_fps + 5) / 10;
+		DSI_DEBUG("MSM_LCD irq_fps time=%lld,last=%lld,diff=%lld us,count=%lld,fps=%d/10\n", zte_fps_time, display->panel->disp_feature->zte_last_fps_time,
+			zte_diff_fps_time, fps_count, display->panel->disp_feature->zte_get_irq_fps);
+	} else if (display->panel->disp_feature->zte_last_fps_time == 0) {
+		fps_count = 0;
+	}
+	fps_count++; //zte modify need skip first count,because irq_handle	don't trigger with te at the same time
+	display->panel->disp_feature->zte_last_fps_time = zte_fps_time;
+
+	return IRQ_HANDLED;
+}
+
+void zte_dsi_display_register_fps_irq(struct dsi_panel *panel)
+{
+	int rc = 0;
+	struct platform_device *pdev;
+	struct device *dev;
+	unsigned int lcd_fps_irq;
+	struct dsi_parser_utils *utils = &panel->utils;
+	struct dsi_display *display = get_main_display();
+
+	if (!display) {
+		DSI_ERR("msm_lcd irq_fps invalid display\n");
+		return;
+	}
+	if (!panel) {
+		DSI_ERR("msm_lcd irq_fps invalid panel!\n");
+		return;
+	}
+
+	pdev = display->pdev;
+	if (!pdev) {
+		DSI_ERR("msm_lcd irq_fps invalid platform device\n");
+		return;
+	}
+
+	dev = &pdev->dev;
+	if (!dev) {
+		DSI_ERR("msm_lcd irq_fps invalid device\n");
+		return;
+	}
+
+	if (display->trusted_vm_env) {
+		DSI_INFO("msm_lcd irq_fps GPIO are not enabled in trusted VM\n");
+		return;
+	}
+
+	//panel->disp_feature->zte_lcd_fps_irq_gpio = of_get_named_gpio(dev->of_node,
+	//				"zte,lcd-fps-irq-gpio", 0); //of_get_named_gpio_flags
+	panel->disp_feature->zte_lcd_fps_irq_gpio = utils->get_named_gpio(utils->data,
+							  "zte,lcd-fps-irq-gpio", 0);
+	if (!gpio_is_valid(panel->disp_feature->zte_lcd_fps_irq_gpio)) {
+		DSI_ERR("msm_lcd irq_fps Invalid gpio\n");
+		return;
+	}
+
+	rc = gpio_request(panel->disp_feature->zte_lcd_fps_irq_gpio, "zte_lcd_fps_irq_gpio");
+	if (rc) {
+		DSI_ERR("msm_lcd Failed to request lcd irq_fps gpio rc=%d\n", rc);
+		return;
+	} else
+		gpio_direction_input(panel->disp_feature->zte_lcd_fps_irq_gpio);
+
+	/* Avoid deferred spurious irqs with disable_irq */
+	lcd_fps_irq = gpio_to_irq(panel->disp_feature->zte_lcd_fps_irq_gpio);
+	irq_set_status_flags(lcd_fps_irq, IRQ_DISABLE_UNLAZY);
+
+	rc = devm_request_irq(dev, lcd_fps_irq, zte_dsi_display_fps_irq_handler,
+			      IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+			      "FPS_IRQ_GPIO", display);
+	if (rc) {
+		DSI_ERR("MSM_LCD irq_fps request_irq failed for lcd rc:%d\n", rc);
+		irq_clear_status_flags(lcd_fps_irq, IRQ_DISABLE_UNLAZY);
+		return;
+	}
+
+	disable_irq(lcd_fps_irq);
+
+	return;
+}
+/*add by zte lcd for irq_fps  gpio irq end*/
 
 void __init dsi_display_register(void)
 {

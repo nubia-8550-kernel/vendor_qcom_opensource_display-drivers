@@ -16,6 +16,11 @@
 #include "sde_kms.h"
 #include "sde_fence.h"
 
+// #ifdef CONFIG_ZTE_LCD_HBM
+#include "./zte_disp/zte_lcd_common.h"
+#include "sde_trace.h"
+// #endif
+
 #define SDE_CONNECTOR_NAME_SIZE	16
 #define SDE_CONNECTOR_DHDR_MEMPOOL_MAX_SIZE	SZ_32
 #define MAX_CMD_RECEIVE_SIZE       256

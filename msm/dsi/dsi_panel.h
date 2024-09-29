@@ -153,6 +153,13 @@ struct dsi_backlight_config {
 
 	/* DCS params */
 	bool lp_mode;
+
+    /* zte backlight config */
+	bool curve_enabled;
+	u32 curve_mode;
+	u16 lcd_restore_bl;
+	u16 zte_lcd_thermal_max_brightness;
+	int (*zte_convert_brightness)(int level, u32 bl_max, u32 mode);
 };
 
 struct dsi_reset_seq {
@@ -210,6 +217,63 @@ struct dsi_panel_ops {
 	int (*parse_power_cfg)(struct dsi_panel *panel);
 	int (*trigger_esd_attack)(struct dsi_panel *panel);
 };
+
+/* add by zte for panel config begin */
+#define COLOR_GAMUT_ORIGINAL    0
+#define COLOR_GAMUT_SRGB        1
+#define COLOR_GAMUT_P3          2
+#define BUF_LEN_MAX    256
+
+struct disp_hbm_config {
+    /* HBM */
+    bool global_hbm;
+    u32 zte_lcd_hbm_mode;
+    /* HDR */
+    u32 hdr_brightness;
+    u32 hdr_threshold;
+	bool hdr_sunlight_bl_ctrl;
+    bool hdr_video_enable;
+	u32 hdr_sunlight_lvl;
+};
+
+struct zte_disp_feature {
+    const char *zte_lcd_info;
+    struct disp_hbm_config *hbm_config;
+    /* Disp Feature */
+    u32 zte_lcd_hbm;
+    u32 zte_lcd_hdr;
+    u32 zte_lcd_aod_bl;
+    u32 zte_lcd_cur_fps;
+    u32 zte_lcd_color_gamut;
+    u32 zte_lcd_acl;
+    u32 zte_panel_state;
+	u32 zte_lcd_od;
+	u32 zte_lcd_lspot;
+	u32 zte_lcd_spr;
+	bool zte_lcd_fps_need_blank;
+#ifdef CONFIG_ZTE_LCD_ZLOG
+	 struct zlog_client *zlog_lcd_client;
+#endif
+	u32 zte_lcd_bl_limit;
+	bool zte_lcd_bl_limit_feature_enable;
+	/*add by zte lcd for fps gpio irq begin*/
+	u32 zte_lcd_second_irq_fps; // 1=enable 0=close and send fps event
+	bool zte_lcd_fps_irq_gpio_feature_enable;
+	u32 zte_lcd_fps_irq_gpio;
+	u32 zte_lcd_fps_irq_intr_enable;
+	u32 zte_last_fps_time;
+	u16 zte_get_irq_fps;
+	/*add by zte lcd for fps gpio irq end*/
+};
+
+struct dsi_read_config {
+	bool is_read;
+	struct dsi_panel_cmd_set read_cmd;
+	u32 cmds_rlen;
+	u32 valid_bits;
+	u8 rbuf[BUF_LEN_MAX];
+};
+/* add by zte for panel config end */
 
 struct dsi_panel {
 	const char *name;
@@ -274,6 +338,24 @@ struct dsi_panel {
 	enum dsi_panel_physical_type panel_type;
 
 	struct dsi_panel_ops panel_ops;
+
+    /* zte define feature */
+	struct zte_disp_feature *disp_feature;
+	/* zte panel config */
+	bool is_hbm_enabled;
+	bool in_aod;
+	bool fod_layer;
+	bool aod_layer;
+	bool hbm_need_delay;
+	atomic_t aod_entering;
+	atomic_t aod_exiting;
+	atomic_t skip_nolp;
+	u32 saved_backlight;
+	u32 aod_exit_delay_time;
+	u64 aod_enter_time;
+	u32 zte_lcd_thermal_max_brightness;
+	struct delayed_work dim_work;
+	struct delayed_work report_fod_in_aod_work;
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
@@ -410,4 +492,10 @@ int dsi_panel_create_cmd_packets(const char *data, u32 length, u32 count,
 void dsi_panel_destroy_cmd_packets(struct dsi_panel_cmd_set *set);
 
 void dsi_panel_dealloc_cmd_packets(struct dsi_panel_cmd_set *set);
+
+extern void zte_disp_common_func(struct dsi_panel *panel);
+
+int zte_dsi_panel_tx_cmd_set(struct dsi_panel *panel, enum dsi_cmd_set_type type);
+
+int dsi_panel_set_hbm_on(struct dsi_panel *panel);
 #endif /* _DSI_PANEL_H_ */
